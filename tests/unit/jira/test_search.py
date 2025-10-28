@@ -568,6 +568,92 @@ class TestSearchMixin:
             search_mixin.get_sprint_issues("10001")
         assert "API Error content" in str(e.value)
 
+    def test_get_sprint_issues_with_fields_parameter(self, search_mixin: SearchMixin):
+        """Test that get_sprint_issues passes fields parameter to API and filters results."""
+        mock_issues = {
+            "issues": [
+                {
+                    "id": "10001",
+                    "key": "TEST-123",
+                    "fields": {
+                        "summary": "Test issue",
+                        "status": {"name": "Open"},
+                        "priority": {"name": "High"},
+                        "description": "This should not be included",
+                        "assignee": {"displayName": "John Doe"},
+                    },
+                }
+            ],
+            "total": 1,
+            "startAt": 0,
+            "maxResults": 50,
+        }
+        search_mixin.jira.get_sprint_issues.return_value = mock_issues
+
+        # Call with specific fields
+        result = search_mixin.get_sprint_issues("10001", fields="summary,status,priority")
+
+        # Verify API was called with fields parameter
+        search_mixin.jira.get_sprint_issues.assert_called_once_with(
+            sprint_id="10001",
+            fields="summary,status,priority",
+            start=0,
+            limit=50,
+        )
+
+        # Verify result structure
+        assert isinstance(result, JiraSearchResult)
+        assert len(result.issues) == 1
+
+        # Verify client-side filtering - only requested fields should be in simplified dict
+        issue_dict = result.issues[0].to_simplified_dict()
+        assert "summary" in issue_dict
+        assert "status" in issue_dict
+        assert "priority" in issue_dict
+        # These fields should be filtered out
+        assert "description" not in issue_dict
+        assert "assignee" not in issue_dict
+
+    def test_get_sprint_issues_fallback_when_fields_not_supported(
+        self, search_mixin: SearchMixin
+    ):
+        """Test fallback when API doesn't support fields parameter."""
+        mock_issues = {
+            "issues": [
+                {
+                    "id": "10001",
+                    "key": "TEST-123",
+                    "fields": {
+                        "summary": "Test issue",
+                        "status": {"name": "Open"},
+                        "priority": {"name": "High"},
+                    },
+                }
+            ],
+            "total": 1,
+            "startAt": 0,
+            "maxResults": 50,
+        }
+
+        # First call with fields raises TypeError, second call without fields succeeds
+        search_mixin.jira.get_sprint_issues.side_effect = [
+            TypeError("unexpected keyword argument 'fields'"),
+            mock_issues,
+        ]
+
+        # Call with specific fields
+        result = search_mixin.get_sprint_issues("10001", fields="summary,status")
+
+        # Verify API was called twice (first with fields, then without)
+        assert search_mixin.jira.get_sprint_issues.call_count == 2
+
+        # Verify result is still valid and filtering works
+        assert isinstance(result, JiraSearchResult)
+        assert len(result.issues) == 1
+        issue_dict = result.issues[0].to_simplified_dict()
+        assert "summary" in issue_dict
+        assert "status" in issue_dict
+
     @pytest.mark.parametrize("is_cloud", [True, False])
     def test_search_issues_with_projects_filter_jql_construction(
         self, search_mixin: SearchMixin, mock_issues_response, is_cloud

@@ -263,17 +263,34 @@ class SearchMixin(JiraClient, IssueOperationsProto):
             if fields_param is None:
                 fields_param = ",".join(DEFAULT_READ_JIRA_FIELDS)
 
-            response = self.jira.get_sprint_issues(
-                sprint_id=sprint_id,
-                start=start,
-                limit=limit,
-            )
+            # Try to pass fields parameter to API call
+            # If the API ignores it, filtering will still work via requested_fields
+            try:
+                response = self.jira.get_sprint_issues(
+                    sprint_id=sprint_id,
+                    fields=fields_param,
+                    start=start,
+                    limit=limit,
+                )
+            except TypeError:
+                # If fields parameter is not supported by the API method, call without it
+                logger.debug(
+                    "API method get_sprint_issues does not support 'fields' parameter, "
+                    "filtering will be applied on the client side"
+                )
+                response = self.jira.get_sprint_issues(
+                    sprint_id=sprint_id,
+                    start=start,
+                    limit=limit,
+                )
+
             if not isinstance(response, dict):
                 msg = f"Unexpected return value type from `jira.get_sprint_issues`: {type(response)}"
                 logger.error(msg)
                 raise TypeError(msg)
 
             # Convert the response to a search result model
+            # The requested_fields parameter ensures client-side filtering in JiraIssue.to_simplified_dict()
             search_result = JiraSearchResult.from_api_response(
                 response, base_url=self.config.url, requested_fields=fields_param
             )
